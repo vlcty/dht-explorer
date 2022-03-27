@@ -4,8 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"net"
-	"time"
 	"sort"
+	"time"
 
 	_ "github.com/anacrolix/envpprof"
 
@@ -16,9 +16,9 @@ import (
 var (
 	serveAddr = flag.String("serveAddr", ":0", "local UDP address")
 	infoHash  = flag.String("infoHash", "", "torrent infohash")
+	maxNodes  = flag.Int("maxNodes", 200, "max amount of nodes to query")
 
-	s       *dht.Server
-	max     = 200
+	server       *dht.Server
 	counter = 0
 )
 
@@ -26,11 +26,10 @@ func printTable(seen map[string]krpc.NodeAddr) {
 	fmt.Printf("\n\nPeers associated with that torrent:\n")
 
 	peers := make([]string, 0, len(seen))
-for _, peer := range seen {
-	peers = append(peers, peer.String())
-}
-sort.Strings(peers)
-
+	for _, peer := range seen {
+		peers = append(peers, peer.String())
+	}
+	sort.Strings(peers)
 
 	for _, peer := range peers {
 		fmt.Printf("%s\n", peer)
@@ -49,7 +48,7 @@ func main() {
 			fmt.Println(err)
 		}
 	default:
-		fmt.Println("require 20 byte infohash")
+		fmt.Println("require 20 or 40 byte infohash")
 	}
 	conn, err := net.ListenPacket("udp", *serveAddr)
 	if err != nil {
@@ -59,17 +58,17 @@ func main() {
 		Conn:          conn,
 		StartingNodes: dht.GlobalBootstrapAddrs}
 
-	s, err = dht.NewServer(&sc)
+	server, err = dht.NewServer(&sc)
 	if err != nil {
 		fmt.Println(err)
 	}
-	fmt.Printf("dht server on %s, ID is %x\n", s.Addr(), s.ID())
+	fmt.Printf("dht server on %s, ID is %x\n", server.Addr(), server.ID())
 
 	seen := make(map[string]krpc.NodeAddr)
 
-	var ih [20]byte
-	copy(ih[:], *infoHash)
-	ps, err := s.Announce(ih, 0, false)
+	var infohash [20]byte
+	copy(infohash[:], *infoHash)
+	ps, err := server.Announce(infohash, 0, false)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -86,25 +85,20 @@ func main() {
 			return
 		}
 
-		if counter % 10 == 0 {
-			fmt.Print(".")
+		if counter%20 == 0 {
+			fmt.Print("\r")
+			fmt.Printf("Progress: %d / %d nodes discovered. Found: %d", counter, *maxNodes, len(seen))
 		}
-
-		if len(v.Peers) == 0 {
-			continue
-		}
-
-		fmt.Printf("Received %d peers from %x\n", len(v.Peers), v.NodeInfo.ID)
 
 		for _, p := range v.Peers {
-			if _, ok := seen[p.String()]; ok {
+			if _, ok := seen[p.IP.String()]; ok {
 				continue
 			} else {
-				seen[p.String()] = p
+				seen[p.IP.String()] = p
 			}
 		}
 
-		if counter >= max {
+		if counter >= *maxNodes {
 			printTable(seen)
 			return
 		}
